@@ -1331,7 +1331,7 @@ static CK_RV mxl_object_mgr_create_final_certificate(STDLL_TokData_t *tokdata,
     return rc;
 }
 
-int mxl_write_rsa_pkcs8_private_key(OBJECT *key_obj, uint32_t key_id)
+int mxl_write_rsa_pkcs8_key(OBJECT *key_obj, uint32_t key_id)
 {
     int ret = -1;
     BIO *bio = NULL;
@@ -1351,61 +1351,90 @@ int mxl_write_rsa_pkcs8_private_key(OBJECT *key_obj, uint32_t key_id)
     CK_ATTRIBUTE *exp_2 = NULL;
     CK_ATTRIBUTE *coeff = NULL;
     BIGNUM *bn_mod, *bn_pub_exp, *bn_priv_exp, *bn_p1, *bn_p2, *bn_e1, *bn_e2, *bn_cf;
+    CK_BBOOL priv_obj;
 
+    priv_obj = object_is_private(key_obj);
     template_attribute_get_non_empty(key_obj->template, CKA_MODULUS, &modulus);
     template_attribute_get_non_empty(key_obj->template,  CKA_PUBLIC_EXPONENT, &pub_exp);
-    template_attribute_find(key_obj->template, CKA_PRIVATE_EXPONENT, &priv_exp);
-    template_attribute_find(key_obj->template, CKA_PRIME_1, &prime1);
-    template_attribute_find(key_obj->template, CKA_PRIME_2, &prime2);
-    template_attribute_find(key_obj->template, CKA_EXPONENT_1, &exp_1);
-    template_attribute_find(key_obj->template, CKA_EXPONENT_2,&exp_2);
-    template_attribute_find(key_obj->template, CKA_COEFFICIENT, &coeff);
+    if (priv_obj) {
+        template_attribute_find(key_obj->template, CKA_PRIVATE_EXPONENT, &priv_exp);
+        template_attribute_find(key_obj->template, CKA_PRIME_1, &prime1);
+        template_attribute_find(key_obj->template, CKA_PRIME_2, &prime2);
+        template_attribute_find(key_obj->template, CKA_EXPONENT_1, &exp_1);
+        template_attribute_find(key_obj->template, CKA_EXPONENT_2,&exp_2);
+        template_attribute_find(key_obj->template, CKA_COEFFICIENT, &coeff);
+        if (!modulus || !pub_exp || !priv_exp || !prime1 || !prime2
+            || !exp_1 || !exp_2 || !coeff) {
+            TRACE_ERROR("RSA parameters not found\n");
+            goto error;
+        }
+    }
+    else {
+        if (!modulus || !pub_exp) {
+            TRACE_ERROR("RSA parameters not found\n");
+            goto error;
+        }
 
-    if (!modulus || !pub_exp || !priv_exp || !prime1 || !prime2
-        || !exp_1 || !exp_2 || !coeff) {
-        TRACE_ERROR("RSA parameters not found\n");
-        goto error;
     }
 
     bn_mod = BN_new();
     bn_pub_exp = BN_new();
-    bn_priv_exp = BN_new();
-    bn_p1 = BN_new();
-    bn_p2 = BN_new();
-    bn_e1 = BN_new();
-    bn_e2 = BN_new();
-    bn_cf = BN_new();
+    if (priv_obj) {
+        bn_priv_exp = BN_new();
+        bn_p1 = BN_new();
+        bn_p2 = BN_new();
+        bn_e1 = BN_new();
+        bn_e2 = BN_new();
+        bn_cf = BN_new();
 
-    if ((bn_cf == NULL) || (bn_e2 == NULL) || (bn_e1 == NULL) ||
-        (bn_p2 == NULL) || (bn_p1 == NULL) || (bn_priv_exp == NULL) ||
-        (bn_pub_exp == NULL) || (bn_mod == NULL)) {
-        TRACE_ERROR("BN_new() failed\r\n");
-        return -1;
+        if ((bn_cf == NULL) || (bn_e2 == NULL) || (bn_e1 == NULL) ||
+            (bn_p2 == NULL) || (bn_p1 == NULL) || (bn_priv_exp == NULL) ||
+            (bn_pub_exp == NULL) || (bn_mod == NULL)) {
+            TRACE_ERROR("BN_new() failed\r\n");
+            return -1;
+        }
+    }
+    else {
+        if ((bn_pub_exp == NULL) || (bn_mod == NULL)) {
+            TRACE_ERROR("BN_new() failed\r\n");
+            return -1;
+        }
     }
 
     BN_bin2bn((unsigned char *) modulus->pValue, modulus->ulValueLen, bn_mod);
     BN_bin2bn((unsigned char *) pub_exp->pValue, pub_exp->ulValueLen, bn_pub_exp);
-    BN_bin2bn((unsigned char *) priv_exp->pValue, priv_exp->ulValueLen, bn_priv_exp);
-    BN_bin2bn((unsigned char *) prime1->pValue, prime1->ulValueLen, bn_p1);
-    BN_bin2bn((unsigned char *) prime2->pValue, prime2->ulValueLen, bn_p2);
-    BN_bin2bn((unsigned char *) exp_1->pValue, exp_1->ulValueLen, bn_e1);
-    BN_bin2bn((unsigned char *) exp_2->pValue, exp_2->ulValueLen, bn_e2);
-    BN_bin2bn((unsigned char *) coeff->pValue, coeff->ulValueLen, bn_cf);
+    if (priv_obj) {
+        BN_bin2bn((unsigned char *) priv_exp->pValue, priv_exp->ulValueLen, bn_priv_exp);
+        BN_bin2bn((unsigned char *) prime1->pValue, prime1->ulValueLen, bn_p1);
+        BN_bin2bn((unsigned char *) prime2->pValue, prime2->ulValueLen, bn_p2);
+        BN_bin2bn((unsigned char *) exp_1->pValue, exp_1->ulValueLen, bn_e1);
+        BN_bin2bn((unsigned char *) exp_2->pValue, exp_2->ulValueLen, bn_e2);
+        BN_bin2bn((unsigned char *) coeff->pValue, coeff->ulValueLen, bn_cf);
+    }
 
     tmpl = OSSL_PARAM_BLD_new();
     if (tmpl == NULL)
         goto error;
 
-    if (!OSSL_PARAM_BLD_push_BN(tmpl, OSSL_PKEY_PARAM_RSA_N, bn_mod) ||
-        !OSSL_PARAM_BLD_push_BN(tmpl, OSSL_PKEY_PARAM_RSA_E, bn_pub_exp) ||
-        !OSSL_PARAM_BLD_push_BN(tmpl, OSSL_PKEY_PARAM_RSA_D, bn_priv_exp) ||
-        !OSSL_PARAM_BLD_push_BN(tmpl, OSSL_PKEY_PARAM_RSA_FACTOR1, bn_p1) ||
-        !OSSL_PARAM_BLD_push_BN(tmpl, OSSL_PKEY_PARAM_RSA_FACTOR2, bn_p2) ||
-        !OSSL_PARAM_BLD_push_BN(tmpl, OSSL_PKEY_PARAM_RSA_EXPONENT1, bn_e1) ||
-        !OSSL_PARAM_BLD_push_BN(tmpl, OSSL_PKEY_PARAM_RSA_EXPONENT2, bn_e2) ||
-        !OSSL_PARAM_BLD_push_BN(tmpl, OSSL_PKEY_PARAM_RSA_COEFFICIENT1, bn_cf)) {
-        TRACE_ERROR("OSSL_PARAM_BLD_push_BN failed\r\n");
-        goto error;
+    if (priv_obj) {
+        if (!OSSL_PARAM_BLD_push_BN(tmpl, OSSL_PKEY_PARAM_RSA_N, bn_mod) ||
+            !OSSL_PARAM_BLD_push_BN(tmpl, OSSL_PKEY_PARAM_RSA_E, bn_pub_exp) ||
+            !OSSL_PARAM_BLD_push_BN(tmpl, OSSL_PKEY_PARAM_RSA_D, bn_priv_exp) ||
+            !OSSL_PARAM_BLD_push_BN(tmpl, OSSL_PKEY_PARAM_RSA_FACTOR1, bn_p1) ||
+            !OSSL_PARAM_BLD_push_BN(tmpl, OSSL_PKEY_PARAM_RSA_FACTOR2, bn_p2) ||
+            !OSSL_PARAM_BLD_push_BN(tmpl, OSSL_PKEY_PARAM_RSA_EXPONENT1, bn_e1) ||
+            !OSSL_PARAM_BLD_push_BN(tmpl, OSSL_PKEY_PARAM_RSA_EXPONENT2, bn_e2) ||
+            !OSSL_PARAM_BLD_push_BN(tmpl, OSSL_PKEY_PARAM_RSA_COEFFICIENT1, bn_cf)) {
+            TRACE_ERROR("OSSL_PARAM_BLD_push_BN failed\r\n");
+            goto error;
+        }
+    }
+    else {
+        if (!OSSL_PARAM_BLD_push_BN(tmpl, OSSL_PKEY_PARAM_RSA_N, bn_mod) ||
+            !OSSL_PARAM_BLD_push_BN(tmpl, OSSL_PKEY_PARAM_RSA_E, bn_pub_exp)) {
+            TRACE_ERROR("OSSL_PARAM_BLD_push_BN failed\r\n");
+            goto error;
+        }
     }
 
     params = OSSL_PARAM_BLD_to_param(tmpl);
@@ -1416,20 +1445,40 @@ int mxl_write_rsa_pkcs8_private_key(OBJECT *key_obj, uint32_t key_id)
     if (ctx == NULL)
         goto error;
 
-    if (!EVP_PKEY_fromdata_init(ctx) ||
-        !EVP_PKEY_fromdata(ctx, &pkey, EVP_PKEY_KEYPAIR, params)) {
-        TRACE_ERROR("EVP_PKEY_fromdata failed\r\n");
-        goto error;
+    if (priv_obj) {
+        if (!EVP_PKEY_fromdata_init(ctx) ||
+            !EVP_PKEY_fromdata(ctx, &pkey, EVP_PKEY_KEYPAIR, params)) {
+            TRACE_ERROR("EVP_PKEY_fromdata failed\r\n");
+            goto error;
+        }
     }
+    else {
+        if (!EVP_PKEY_fromdata_init(ctx) ||
+            !EVP_PKEY_fromdata(ctx, &pkey, EVP_PKEY_PUBLIC_KEY, params)) {
+            TRACE_ERROR("EVP_PKEY_fromdata failed\r\n");
+            goto error;
+        }
+    }
+
     bio = BIO_new(BIO_s_mem());
     if (!bio) {
         TRACE_ERROR("BIO_new failed\r\n");
         goto error;
     }
-    if (!PEM_write_bio_PKCS8PrivateKey(bio, pkey, NULL, NULL, 0, NULL, NULL)) {
-        TRACE_ERROR("PEM_write_bio_PKCS8PrivateKey failed\r\n");
-        goto error;
+
+    if (priv_obj) {
+        if (!PEM_write_bio_PKCS8PrivateKey(bio, pkey, NULL, NULL, 0, NULL, NULL)) {
+            TRACE_ERROR("PEM_write_bio_PKCS8PrivateKey failed\r\n");
+            goto error;
+        }
     }
+    else {
+        if (!PEM_write_bio_PUBKEY(bio, pkey)) {
+            TRACE_ERROR("PEM_write_bio_PUBKEY failed\r\n");
+            goto error;
+        }
+    }
+
     BIO_get_mem_ptr(bio, &mem);
     len = mem->length;
     memcpy(buffer, mem->data, len);
@@ -1448,12 +1497,14 @@ error:
     if (params) OSSL_PARAM_free(params);
     if (bn_mod) BN_free(bn_mod);
     if (bn_pub_exp) BN_free(bn_pub_exp);
-    if (bn_priv_exp) BN_free(bn_priv_exp);
-    if (bn_p1) BN_free(bn_p1);
-    if (bn_p2) BN_free(bn_p2);
-    if (bn_e1) BN_free(bn_e1);
-    if (bn_e2) BN_free(bn_e2);
-    if (bn_cf) BN_free(bn_cf);
+    if (priv_obj) {
+        if (bn_priv_exp) BN_free(bn_priv_exp);
+        if (bn_p1) BN_free(bn_p1);
+        if (bn_p2) BN_free(bn_p2);
+        if (bn_e1) BN_free(bn_e1);
+        if (bn_e2) BN_free(bn_e2);
+        if (bn_cf) BN_free(bn_cf);
+    }
     return ret;
 }
 
@@ -1464,93 +1515,43 @@ static CK_RV mxl_object_mgr_create_final_rsa_key(STDLL_TokData_t *tokdata,
     CK_BBOOL priv_obj;
     CK_RV rc;
     CK_ATTRIBUTE *attr = NULL;
-    unsigned char *attribute_buffer = NULL;
-    uint32_t key_id = 0, attribute_size, rsa_key_size, rsa_key[1024] = {0};
-    enum sec_alg keyalgo;
-    int ret, i;
-    CK_BYTE priv_key[512], modulus[512], pub_key[4] = {0};
-    CK_ULONG priv_key_len, modulus_len, pub_key_len;
-    rc = template_attribute_get_non_empty(obj->template, CKA_PUBLIC_EXPONENT, &attr);
-    if (rc != CKR_OK) {
-        TRACE_ERROR("Could not find CKA_PUBLIC_EXPONENT.\n");
-        goto error;
-    }
-    pub_key_len = attr->ulValueLen;
-    memcpy(&pub_key[0], attr->pValue, pub_key_len);
+    uint32_t key_id = 0;
+    int ret;
+    CK_ULONG modulus_len;
+
     rc = template_attribute_get_non_empty(obj->template, CKA_MODULUS, &attr);
     if (rc != CKR_OK) {
         TRACE_ERROR("Could not find CKA_MODULUS for the key.\n");
         goto error;
     }
     modulus_len =  attr->ulValueLen;
-    if (modulus_len == 128) {
-        keyalgo = SEC_ALG_RSA_1024;
-    }
-    else if (modulus_len == 256) {
-        keyalgo = SEC_ALG_RSA_2048;
-    }
-    else if (modulus_len == 384) {
-        keyalgo = SEC_ALG_RSA_3072;
-    }
-    else {
+    if (modulus_len > 384) {
         TRACE_ERROR("Not Supported RSA Key.\n");
         rc = CKR_ATTRIBUTE_VALUE_INVALID;
         goto error;
     }
-    memcpy(&modulus[0], attr->pValue, modulus_len);
-    priv_obj = object_is_private(obj);
-    if (priv_obj) {
-        uint32_t pkcs8_key_id;
-        mxl_rng((CK_BYTE *)&pkcs8_key_id, MXL_SECURE_STORAGE_NAME_LENGTH);
-        rc = template_build_update_attribute(obj->template, CKA_MXL_PKCS8_KEY_HANDLE,(CK_BYTE *)&pkcs8_key_id, sizeof(pkcs8_key_id));
-        if (rc != CKR_OK) {
-            TRACE_ERROR("%s template_build_update_attribute failed with rc=0x%lx\n", __func__, rc);
-            goto error;
-        }
-        ret = mxl_write_rsa_pkcs8_private_key(obj, pkcs8_key_id);
-        if (ret != 0) {
-            TRACE_ERROR("mxl_write_rsa_pkcs8_key failed with error %d\r\n",ret);
-            rc = CKR_FUNCTION_FAILED;
-            goto error;
-        }
-        rc = template_attribute_get_non_empty(obj->template, CKA_PRIVATE_EXPONENT, &attr);
-        if (rc != CKR_OK) {
-            TRACE_ERROR("Could not find CKA_PUBLIC_EXPONENT.\n");
-            goto error;
-        }
-        priv_key_len = attr->ulValueLen;
-        memcpy(&priv_key[0], attr->pValue, priv_key_len);
-        template_remove_attribute(obj->template, CKA_PRIVATE_EXPONENT);
-        template_remove_attribute(obj->template, CKA_PRIME_1);
-        template_remove_attribute(obj->template, CKA_PRIME_2);
-        template_remove_attribute(obj->template, CKA_EXPONENT_1);
-        template_remove_attribute(obj->template, CKA_EXPONENT_2);
-        template_remove_attribute(obj->template, CKA_COEFFICIENT);
-    }
+
     mxl_rng((CK_BYTE *)&key_id, MXL_SECURE_STORAGE_NAME_LENGTH);
     rc = template_build_update_attribute(obj->template, CKA_MXL_SECURE_STORAGE_HANDLE,(CK_BYTE *)&key_id, sizeof(key_id));
     if (rc != CKR_OK) {
         TRACE_ERROR("%s template_build_update_attribute failed with rc=0x%lx\n", __func__, rc);
         goto error;
     }
+    ret = mxl_write_rsa_pkcs8_key(obj, key_id);
+    if (ret != 0) {
+        TRACE_ERROR("mxl_write_rsa_pkcs8_key failed with error %d\r\n",ret);
+        rc = CKR_FUNCTION_FAILED;
+        goto error;
+    }
 
-    rsa_key[0] = 0x2;
-    rsa_key[1] = (uint32_t) keyalgo;
+    priv_obj = object_is_private(obj);
     if (priv_obj) {
-        rsa_key[2] = priv_key_len + modulus_len;
-        rsa_key[3] = 0;
-        rsa_key[4] = priv_key_len;
-        memcpy(&rsa_key[5], priv_key, priv_key_len);
-        i = priv_key_len/4;
-        rsa_key[5 + i] = modulus_len;
-        memcpy(&rsa_key[6 + i], modulus, modulus_len);
-        attribute_buffer =  (unsigned char*)&rsa_key[0] + 32 + priv_key_len + modulus_len;
-        attribute_size = 0;
-        mxltok_generate_mxl_attribute(obj->template, attribute_buffer , &attribute_size);
-        attribute_size = (attribute_size + 3) & ~0x3;
-	i += modulus_len/4;
-        rsa_key[7 + i] = attribute_size;
-        rsa_key_size = 32 + priv_key_len + modulus_len + attribute_size;
+        template_remove_attribute(obj->template, CKA_PRIVATE_EXPONENT);
+        template_remove_attribute(obj->template, CKA_PRIME_1);
+        template_remove_attribute(obj->template, CKA_PRIME_2);
+        template_remove_attribute(obj->template, CKA_EXPONENT_1);
+        template_remove_attribute(obj->template, CKA_EXPONENT_2);
+        template_remove_attribute(obj->template, CKA_COEFFICIENT);
     }
     else {
         CK_BBOOL mxl_key_flag = TRUE;
@@ -1559,25 +1560,6 @@ static CK_RV mxl_object_mgr_create_final_rsa_key(STDLL_TokData_t *tokdata,
             TRACE_ERROR("%s template_build_update_attribute failed with rc=0x%lx\n", __func__, rc);
             goto error;
         }
-        rsa_key[2] = pub_key_len + modulus_len;
-        rsa_key[3] = pub_key_len;
-        memcpy(&rsa_key[4], pub_key, pub_key_len);
-        rsa_key[5] = 0;
-        rsa_key[6] = modulus_len;
-        memcpy(&rsa_key[7], modulus, modulus_len);
-        attribute_buffer =  (unsigned char*)&rsa_key[0] + 32 + modulus_len;
-        attribute_size = 0;
-        mxltok_generate_mxl_attribute(obj->template, attribute_buffer , &attribute_size);
-        attribute_size = (attribute_size + 3) & ~0x3;
-        i = modulus_len/4;
-        rsa_key[7 + i] = attribute_size;
-        rsa_key_size = 36 + modulus_len + attribute_size;
-    }
-    ret = mxl_securestore_write_key(key_id, (uint8_t *)&rsa_key[0], rsa_key_size);
-    if (ret != 0) {
-        TRACE_ERROR("mxl_securestore_write_key failed with error %d\r\n",ret);
-        rc = CKR_FUNCTION_FAILED;
-        goto error;
     }
 
     rc = mxl_object_mgr_create_final_internal(tokdata, sess, obj, handle, key_id);
@@ -2286,8 +2268,13 @@ CK_RV SC_SetAttributeValue(STDLL_TokData_t *tokdata,
     SESSION *sess = NULL;
     CK_RV rc = CKR_OK;
     uint32_t key_id;
+    CK_BYTE ec_params[sizeof(prime256v1)] = {0};
+
     CK_ATTRIBUTE key_id_template[] = {
         {CKA_MXL_SECURE_STORAGE_HANDLE, &key_id, sizeof(key_id)},
+    };
+    CK_ATTRIBUTE ec_params_template[] = {
+        {CKA_EC_PARAMS, &ec_params[0], sizeof(ec_params)}
     };
 
     if (tokdata->initialized == FALSE) {
@@ -2309,18 +2296,22 @@ CK_RV SC_SetAttributeValue(STDLL_TokData_t *tokdata,
         goto done;
     }
 
-    rc = XProcLock(tokdata);
-    if (rc != CKR_OK) {
-        TRACE_ERROR("Failed to get process lock.\n");
-        goto done;
-    }
+    rc = object_mgr_get_attribute_values(tokdata, sess, hObject, ec_params_template, 1);
+    if (rc == CKR_OK) {
 
-    rc = mxltok_set_attribute_value(tokdata, hObject, pTemplate, ulCount, key_id);
-    XProcUnLock(tokdata);
+        rc = XProcLock(tokdata);
+        if (rc != CKR_OK) {
+            TRACE_ERROR("Failed to get process lock.\n");
+            goto done;
+        }
 
-    if (rc != CKR_OK) {
-        TRACE_ERROR("mxltok_set_attribute_value failed with error rc = 0x%08lx\n", rc);
-        goto done;
+        rc = mxltok_set_attribute_value(tokdata, hObject, pTemplate, ulCount, key_id);
+        XProcUnLock(tokdata);
+
+        if (rc != CKR_OK) {
+            TRACE_ERROR("mxltok_set_attribute_value failed with error rc = 0x%08lx\n", rc);
+            goto done;
+        }
     }
 
     rc = object_mgr_set_attribute_values(tokdata, sess, hObject, pTemplate,
@@ -2493,6 +2484,8 @@ CK_RV mxltok_sign(SESSION *sess, CK_BYTE_PTR pData, CK_ULONG ulDataLen, CK_BYTE_
     sign_params.signature = NULL;
     sign_params.sign_algo = sign_algo;
     loadkey.load_algo = sign_algo;
+    loadkey.load_flags = PRIVATE_KEY_PLAINTEXT;
+
     switch (sign_algo) {
         case SEC_ALG_ECDSA_P256:
             sign_params.hash_algo =  ECDSA_ASN1_SHA256;
@@ -2505,6 +2498,7 @@ CK_RV mxltok_sign(SESSION *sess, CK_BYTE_PTR pData, CK_ULONG ulDataLen, CK_BYTE_
         case SEC_ALG_RSA_1024:
         case SEC_ALG_RSA_2048:
         case SEC_ALG_RSA_3072:
+            loadkey.load_flags = PRIVATE_KEY_PKCS8;
             switch (mechanism) {
                 case CKM_SHA1_RSA_PKCS:
                     sign_params.hash_algo = RSA_PKCS1_5_SHA1;
@@ -2549,7 +2543,6 @@ CK_RV mxltok_sign(SESSION *sess, CK_BYTE_PTR pData, CK_ULONG ulDataLen, CK_BYTE_
             break;
     }
     mxl_securestore_create_keypair_object_name(key_name, key_id);
-    loadkey.load_flags = PRIVATE_KEY_PLAINTEXT;
     loadkey.key_type =  KEY_PRIVATE;
 
     if (mxl_init_scsa_session() != TEEC_SUCCESS) {
@@ -2629,6 +2622,7 @@ CK_RV mxltok_sign_digest(SESSION *sess, CK_BYTE_PTR pData, CK_ULONG ulDataLen, C
     sign_digest_params.signature = NULL;
     sign_digest_params.sign_algo = sign_algo;
     loadkey.load_algo = sign_algo;
+    loadkey.load_flags = PRIVATE_KEY_PLAINTEXT;
 
     switch (sign_algo) {
         case SEC_ALG_ECDSA_P256:
@@ -2642,6 +2636,7 @@ CK_RV mxltok_sign_digest(SESSION *sess, CK_BYTE_PTR pData, CK_ULONG ulDataLen, C
         case SEC_ALG_RSA_1024:
         case SEC_ALG_RSA_2048:
         case SEC_ALG_RSA_3072:
+            loadkey.load_flags = PRIVATE_KEY_PKCS8;
             if (mech == CKM_RSA_PKCS) {
                switch (ulDataLen) {
                    case 20:
@@ -2728,7 +2723,6 @@ CK_RV mxltok_sign_digest(SESSION *sess, CK_BYTE_PTR pData, CK_ULONG ulDataLen, C
     }
 
     mxl_securestore_create_keypair_object_name(key_name, key_id);
-    loadkey.load_flags = PRIVATE_KEY_PLAINTEXT;
     loadkey.key_type =  KEY_PRIVATE;
 
     if (mxl_init_scsa_session() != TEEC_SUCCESS) {
@@ -3010,6 +3004,7 @@ CK_RV mxltok_verify(SESSION *sess, CK_BYTE_PTR pData, CK_ULONG ulDataLen, CK_BYT
     uint32_t key_id = sess->verify_ctx.key;
     verify_params.sign_algo = sign_algo;
     loadkey.load_algo = sign_algo;
+    loadkey.load_flags = PRIVATE_KEY_PLAINTEXT;
 
     switch (sign_algo) {
         case SEC_ALG_ECDSA_P256:
@@ -3023,6 +3018,7 @@ CK_RV mxltok_verify(SESSION *sess, CK_BYTE_PTR pData, CK_ULONG ulDataLen, CK_BYT
         case SEC_ALG_RSA_1024:
         case SEC_ALG_RSA_2048:
         case SEC_ALG_RSA_3072:
+            loadkey.load_flags = PRIVATE_KEY_PKCS8;
             switch (mechanism) {
                 case CKM_SHA1_RSA_PKCS:
                     verify_params.hash_algo = RSA_PKCS1_5_SHA1;
@@ -3067,7 +3063,6 @@ CK_RV mxltok_verify(SESSION *sess, CK_BYTE_PTR pData, CK_ULONG ulDataLen, CK_BYT
     }
 
     mxl_securestore_create_keypair_object_name(key_name, key_id);
-    loadkey.load_flags = PRIVATE_KEY_PLAINTEXT;
     loadkey.key_type =  KEY_PUBLIC;
 
     if (mxl_init_scsa_session() != TEEC_SUCCESS) {
@@ -3160,6 +3155,8 @@ CK_RV mxltok_verify_digest(SESSION *sess, CK_BYTE_PTR pData, CK_ULONG ulDataLen,
     uint32_t key_id = sess->verify_ctx.key;
     digest_verify_params.sign_algo = sign_algo;
     loadkey.load_algo = sign_algo;
+    loadkey.load_flags = PRIVATE_KEY_PLAINTEXT;
+
     switch (sign_algo) {
         case SEC_ALG_ECDSA_P256:
             digest_verify_params.hash_algo =  ECDSA_ASN1_SHA256;
@@ -3172,6 +3169,7 @@ CK_RV mxltok_verify_digest(SESSION *sess, CK_BYTE_PTR pData, CK_ULONG ulDataLen,
         case SEC_ALG_RSA_1024:
         case SEC_ALG_RSA_2048:
         case SEC_ALG_RSA_3072:
+            loadkey.load_flags = PRIVATE_KEY_PKCS8;
             if (mech == CKM_RSA_PKCS) {
                switch (ulDataLen) {
                    case 20:
@@ -3259,7 +3257,6 @@ CK_RV mxltok_verify_digest(SESSION *sess, CK_BYTE_PTR pData, CK_ULONG ulDataLen,
     }
 
     mxl_securestore_create_keypair_object_name(key_name, key_id);
-    loadkey.load_flags = PRIVATE_KEY_PLAINTEXT;
     loadkey.key_type =  KEY_PUBLIC;
 
     if (mxl_init_scsa_session() != TEEC_SUCCESS) {
@@ -3430,7 +3427,7 @@ CK_RV SC_DecryptInit(STDLL_TokData_t *tokdata, ST_SESSION_HANDLE *sSession,
     int sign_algo;
     CK_RSA_PKCS_OAEP_PARAMS *oaep = NULL;
     CK_ATTRIBUTE key_id_template[] = {
-        {CKA_MXL_PKCS8_KEY_HANDLE, &key_id, sizeof(key_id)}
+        {CKA_MXL_SECURE_STORAGE_HANDLE, &key_id, sizeof(key_id)}
     };
     CK_ATTRIBUTE modulus_template[] = {
         {CKA_MODULUS, &modulus[0], sizeof(modulus)}
@@ -3926,7 +3923,7 @@ CK_RV SC_DestroyObject(STDLL_TokData_t *tokdata, ST_SESSION_HANDLE *sSession,
     CK_RV rc = CKR_OK;
     OBJECT_MAP *map = NULL;
 
-    uint32_t key_id, pkcs8_key_id;
+    uint32_t key_id;
     CK_BBOOL mxl_key_flag;
     CK_ATTRIBUTE key_id_template[] = {
         {CKA_MXL_SECURE_STORAGE_HANDLE, &key_id, sizeof(key_id)},
@@ -3934,9 +3931,7 @@ CK_RV SC_DestroyObject(STDLL_TokData_t *tokdata, ST_SESSION_HANDLE *sSession,
     CK_ATTRIBUTE public_key_id_template[] = {
         {CKA_MXL_KEY_TYPE, &mxl_key_flag, sizeof(CK_BBOOL)},
     };
-    CK_ATTRIBUTE pkcs8_key_id_template[] = {
-        {CKA_MXL_PKCS8_KEY_HANDLE, &pkcs8_key_id, sizeof(pkcs8_key_id)},
-    };
+
     if (tokdata->initialized == FALSE) {
         TRACE_ERROR("%s\n", ock_err(ERR_CRYPTOKI_NOT_INITIALIZED));
         rc = CKR_CRYPTOKI_NOT_INITIALIZED;
@@ -3969,10 +3964,6 @@ CK_RV SC_DestroyObject(STDLL_TokData_t *tokdata, ST_SESSION_HANDLE *sSession,
     }
     if (map->is_private) {
         mxl_securestore_delete_keypair(key_id);
-        rc = object_mgr_get_attribute_values(tokdata, sess, hObject, pkcs8_key_id_template, 1);
-        if (rc == CKR_OK) {
-            mxl_securestore_delete_keypair(pkcs8_key_id);
-        }
     }
     else {
         rc = object_mgr_get_attribute_values(tokdata, sess, hObject, public_key_id_template, 1);
