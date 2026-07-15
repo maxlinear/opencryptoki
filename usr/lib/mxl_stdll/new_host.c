@@ -1949,18 +1949,13 @@ static CK_RV mxltok_generate_key_pair(STDLL_TokData_t *tokdata,
 
     if (mxl_prepare_generate_key_pair(key_name, keyalgo, &genkey, &op) < 0) {
         TRACE_ERROR("mxl_prepare_generate_key_pair failed\r\n");
+        mxl_exit_scsa_session();
         XProcUnLock(tokdata);
         rc = CKR_FUNCTION_FAILED;
         goto error;
     }
 
     ret = mxl_execute_scsa_command(TA_SECURE_CRYPTO_GEN_KEYPAIR, &op);
-    if (ret != TEEC_SUCCESS) {
-        TRACE_ERROR("TEE execute SCSA command TA_SECURE_CRYPTO_GEN_KEYPAIR failed with error = %x \n", ret);
-        XProcUnLock(tokdata);
-        rc = CKR_FUNCTION_FAILED;
-        goto error;
-    }
 
     if (genkey.sst_params.handle)
 	     securestore_close(genkey.sst_params.handle);
@@ -1969,6 +1964,12 @@ static CK_RV mxltok_generate_key_pair(STDLL_TokData_t *tokdata,
     rc = XProcUnLock(tokdata);
     if (rc != CKR_OK) {
         TRACE_ERROR("Failed to release Process Lock.\n");
+        goto error;
+    }
+
+    if (ret != TEEC_SUCCESS) {
+        TRACE_ERROR("TEE execute SCSA command TA_SECURE_CRYPTO_GEN_KEYPAIR failed with error = %x \n", ret);
+        rc = CKR_FUNCTION_FAILED;
         goto error;
     }
 

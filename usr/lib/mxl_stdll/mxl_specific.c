@@ -181,6 +181,8 @@ int mxl_init_scsa_session(void)
 
     if (result != TEEC_SUCCESS) {
         TRACE_ERROR("opening session with TEEC failed.. \n");
+        TEEC_FinalizeContext(&ctx->context);
+        return result;
     }
     scsa_app_ctx = ctx;
     return result;
